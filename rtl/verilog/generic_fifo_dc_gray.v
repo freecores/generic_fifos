@@ -40,16 +40,19 @@
 
 //  CVS Log
 //
-//  $Id: generic_fifo_dc_gray.v,v 1.1 2003-10-14 09:34:41 rudi Exp $
+//  $Id: generic_fifo_dc_gray.v,v 1.2 2004-01-13 09:11:55 rudi Exp $
 //
-//  $Date: 2003-10-14 09:34:41 $
-//  $Revision: 1.1 $
+//  $Date: 2004-01-13 09:11:55 $
+//  $Revision: 1.2 $
 //  $Author: rudi $
 //  $Locker:  $
 //  $State: Exp $
 //
 // Change History:
 //               $Log: not supported by cvs2svn $
+//               Revision 1.1  2003/10/14 09:34:41  rudi
+//               Dual clock FIFO Gray Code encoded version.
+//
 //
 //
 //
@@ -117,19 +120,10 @@ empty will place the FIFO in an undefined state.
 */
 
 
-// Selecting Sync. or Async Reset
-// ------------------------------
-// Uncomment one of the two lines below. The first line for
-// synchronous reset, the second for asynchronous reset
-
-//`define DC_FIFO_ASYNC_RESET				// Uncomment for Syncr. reset
-`define DC_FIFO_ASYNC_RESET	or negedge rst		// Uncomment for Async. reset
-
-
 module generic_fifo_dc_gray(	rd_clk, wr_clk, rst, clr, din, we,
 		dout, re, full, empty, wr_level, rd_level );
 
-parameter dw=8;
+parameter dw=16;
 parameter aw=8;
 
 input			rd_clk, wr_clk, rst, clr;
@@ -150,8 +144,6 @@ output	[1:0]		rd_level;
 reg	[aw:0]		wp_bin, wp_gray;
 reg	[aw:0]		rp_bin, rp_gray;
 reg	[aw:0]		wp_s, rp_s;
-reg			re_s, we_s;
-
 reg			full, empty;
 
 wire	[aw:0]		wp_bin_next, wp_gray_next;
@@ -160,6 +152,52 @@ wire	[aw:0]		rp_bin_next, rp_gray_next;
 wire	[aw:0]		wp_bin_x, rp_bin_x;
 reg	[aw-1:0]	d1, d2;
 
+reg			rd_rst, wr_rst;
+reg			rd_rst_r, wr_rst_r;
+reg			rd_clr, wr_clr;
+reg			rd_clr_r, wr_clr_r;
+
+////////////////////////////////////////////////////////////////////
+//
+// Reset Logic
+//
+
+always @(posedge rd_clk or negedge rst)
+	if(!rst)	rd_rst <= 1'b0;
+	else
+	if(rd_rst_r)	rd_rst <= 1'b1;		// Release Reset
+
+always @(posedge rd_clk or negedge rst)
+	if(!rst)	rd_rst_r <= 1'b0;
+	else		rd_rst_r <= 1'b1;
+
+always @(posedge wr_clk or negedge rst)
+	if(!rst)	wr_rst <= 1'b0;
+	else
+	if(wr_rst_r)	wr_rst <= 1'b1;		// Release Reset
+
+always @(posedge wr_clk or negedge rst)
+	if(!rst)	wr_rst_r <= 1'b0;
+	else		wr_rst_r <= 1'b1;
+
+always @(posedge rd_clk or posedge clr)
+	if(clr)		rd_clr <= 1'b1;
+	else
+	if(!rd_clr_r)	rd_clr <= 1'b0;		// Release Clear
+
+always @(posedge rd_clk or posedge clr)
+	if(clr)		rd_clr_r <= 1'b1;
+	else		rd_clr_r <= 1'b0;
+
+always @(posedge wr_clk or posedge clr)
+	if(clr)		wr_clr <= 1'b1;
+	else
+	if(!wr_clr_r)	wr_clr <= 1'b0;		// Release Clear
+
+always @(posedge wr_clk or posedge clr)
+	if(clr)		wr_clr_r <= 1'b1;
+	else		wr_clr_r <= 1'b0;
+
 ////////////////////////////////////////////////////////////////////
 //
 // Memory Block
@@ -167,13 +205,13 @@ reg	[aw-1:0]	d1, d2;
 
 generic_dpram  #(aw,dw) u0(
 	.rclk(		rd_clk		),
-	.rrst(		!rst		),
+	.rrst(		!rd_rst		),
 	.rce(		1'b1		),
 	.oe(		1'b1		),
 	.raddr(		rp_bin[aw-1:0]	),
 	.do(		dout		),
 	.wclk(		wr_clk		),
-	.wrst(		!rst		),
+	.wrst(		!wr_rst		),
 	.wce(		1'b1		),
 	.we(		we		),
 	.waddr(		wp_bin[aw-1:0]	),
@@ -185,36 +223,36 @@ generic_dpram  #(aw,dw) u0(
 // Read/Write Pointers Logic
 //
 
-always @(posedge wr_clk `DC_FIFO_ASYNC_RESET)
-	if(!rst)	wp_bin <= #1 {aw+1{1'b0}};
+always @(posedge wr_clk)
+	if(!wr_rst)	wp_bin <= {aw+1{1'b0}};
 	else
-	if(clr)		wp_bin <= #1 {aw+1{1'b0}};
+	if(wr_clr)	wp_bin <= {aw+1{1'b0}};
 	else
-	if(we)		wp_bin <= #1 wp_bin_next;
+	if(we)		wp_bin <= wp_bin_next;
 
-always @(posedge wr_clk `DC_FIFO_ASYNC_RESET)
-	if(!rst)	wp_gray <= #1 {aw+1{1'b0}};
+always @(posedge wr_clk)
+	if(!wr_rst)	wp_gray <= {aw+1{1'b0}};
 	else
-	if(clr)		wp_gray <= #1 {aw+1{1'b0}};
+	if(wr_clr)	wp_gray <= {aw+1{1'b0}};
 	else
-	if(we)		wp_gray <= #1 wp_gray_next;
+	if(we)		wp_gray <= wp_gray_next;
 
 assign wp_bin_next  = wp_bin + {{aw{1'b0}},1'b1};
 assign wp_gray_next = wp_bin_next ^ {1'b0, wp_bin_next[aw:1]};
 
-always @(posedge rd_clk `DC_FIFO_ASYNC_RESET)
-	if(!rst)	rp_bin <= #1 {aw+1{1'b0}};
+always @(posedge rd_clk)
+	if(!rd_rst)	rp_bin <= {aw+1{1'b0}};
 	else
-	if(clr)		rp_bin <= #1 {aw+1{1'b0}};
+	if(rd_clr)	rp_bin <= {aw+1{1'b0}};
 	else
-	if(re)		rp_bin <= #1 rp_bin_next;
+	if(re)		rp_bin <= rp_bin_next;
 
-always @(posedge rd_clk `DC_FIFO_ASYNC_RESET)
-	if(!rst)	rp_gray <= #1 {aw+1{1'b0}};
+always @(posedge rd_clk)
+	if(!rd_rst)	rp_gray <= {aw+1{1'b0}};
 	else
-	if(clr)		rp_gray <= #1 {aw+1{1'b0}};
+	if(rd_clr)	rp_gray <= {aw+1{1'b0}};
 	else
-	if(re)		rp_gray <= #1 rp_gray_next;
+	if(re)		rp_gray <= rp_gray_next;
 
 assign rp_bin_next  = rp_bin + {{aw{1'b0}},1'b1};
 assign rp_gray_next = rp_bin_next ^ {1'b0, rp_bin_next[aw:1]};
@@ -225,17 +263,18 @@ assign rp_gray_next = rp_bin_next ^ {1'b0, rp_bin_next[aw:1]};
 //
 
 // write pointer
-always @(posedge rd_clk)	wp_s <= #1 wp_gray;
-always @(posedge rd_clk)	we_s <= #1 we;
+always @(posedge rd_clk)	wp_s <= wp_gray;
 
 // read pointer
-always @(posedge wr_clk)	rp_s <= #1 rp_gray;
-always @(posedge wr_clk)	re_s <= #1 re;
+always @(posedge wr_clk)	rp_s <= rp_gray;
 
 ////////////////////////////////////////////////////////////////////
 //
 // Registered Full & Empty Flags
 //
+
+assign wp_bin_x = wp_s ^ {1'b0, wp_bin_x[aw:1]};	// convert gray to binary
+assign rp_bin_x = rp_s ^ {1'b0, rp_bin_x[aw:1]};	// convert gray to binary
 
 always @(posedge rd_clk)
         empty <= (wp_s == rp_gray) | (re & (wp_s == rp_gray_next));
@@ -248,19 +287,23 @@ always @(posedge wr_clk)
 //
 // Registered Level Indicators
 //
+reg	[1:0]		wr_level;
+reg	[1:0]		rd_level;
+reg	[aw-1:0]	wp_bin_xr, rp_bin_xr;
+reg			full_rc;
+reg			full_wc;
 
-assign wp_bin_x = wp_s ^ (wp_bin_x>>1);	// convert gray to binary
-assign rp_bin_x = rp_s ^ (rp_bin_x>>1);	// convert gray to binary
+always @(posedge wr_clk)	full_wc <= full;
+always @(posedge wr_clk)	rp_bin_xr <=  ~rp_bin_x[aw-1:0] + {{aw-1{1'b0}}, 1'b1};
+always @(posedge wr_clk)	d1 <= wp_bin[aw-1:0] + rp_bin_xr[aw-1:0];
 
-always @(posedge wr_clk)	d1 <= wp_bin[aw-1:0] - rp_bin_x[aw-1:0];
+always @(posedge wr_clk)	wr_level <= {d1[aw-1] | full | full_wc, d1[aw-2] | full | full_wc};
 
-assign wr_level[0] = d1[aw-2] | full;
-assign wr_level[1] = d1[aw-1] | full;
+always @(posedge rd_clk)	wp_bin_xr <=  ~wp_bin_x[aw-1:0];
+always @(posedge rd_clk)	d2 <= rp_bin[aw-1:0] + wp_bin_xr[aw-1:0];
 
-always @(posedge rd_clk)	d2 <= rp_bin[aw-1:0] - wp_bin_x[aw-1:0];
-
-assign rd_level[0] = d2[aw-2] | empty;
-assign rd_level[1] = d2[aw-1] | empty;
+always @(posedge rd_clk)	full_rc <= full;
+always @(posedge rd_clk)	rd_level <= full_rc ? 2'h0 : {d2[aw-1] | empty, d2[aw-2] | empty};
 
 ////////////////////////////////////////////////////////////////////
 //
@@ -269,11 +312,11 @@ assign rd_level[1] = d2[aw-1] | empty;
 
 // synopsys translate_off
 always @(posedge wr_clk)
-	if(we & full)
+	if(we && full)
 		$display("%m WARNING: Writing while fifo is FULL (%t)",$time);
 
 always @(posedge rd_clk)
-	if(re & empty)
+	if(re && empty)
 		$display("%m WARNING: Reading while fifo is EMPTY (%t)",$time);
 // synopsys translate_on
 
